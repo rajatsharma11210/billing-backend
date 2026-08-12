@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.expensetracker.billing_backend.service.GooglePlayService;
+import com.google.api.services.androidpublisher.model.SubscriptionPurchaseLineItem;
 import com.google.api.services.androidpublisher.model.SubscriptionPurchaseV2;
 
 @RestController
@@ -19,85 +20,118 @@ public class SubscriptionController {
 
     private final GooglePlayService googlePlayService;
 
-    public SubscriptionController(GooglePlayService googlePlayService) {
+    public SubscriptionController(
+            GooglePlayService googlePlayService) {
         this.googlePlayService = googlePlayService;
     }
 
     @PostMapping("/verify")
-public ResponseEntity<?> verifySubscription(
-        @RequestBody Map<String, String> request) {
+    public ResponseEntity<?> verifySubscription(
+            @RequestBody Map<String, String> request) {
 
-    try {
-        String purchaseToken = request.get("purchaseToken");
+        try {
+            String purchaseToken = request.get("purchaseToken");
 
-        if (purchaseToken == null || purchaseToken.isBlank()) {
-            return ResponseEntity.badRequest().body(
-                    Map.of("error", "purchaseToken is required")
-            );
-        }
+            if (purchaseToken == null || purchaseToken.isBlank()) {
+                return ResponseEntity.badRequest().body(
+                        Map.of(
+                                "verified", false,
+                                "error", "purchaseToken is required"
+                        )
+                );
+            }
 
-        SubscriptionPurchaseV2 purchase =
-                googlePlayService.verifySubscription(purchaseToken);
+            SubscriptionPurchaseV2 purchase =
+                    googlePlayService.verifySubscription(
+                            purchaseToken
+                    );
 
-        String subscriptionState =
-                purchase.getSubscriptionState();
+            String subscriptionState =
+                    purchase.getSubscriptionState();
 
-        String expiryTime = null;
+            String expiryTime = null;
+            String productId = null;
 
-        if (purchase.getLineItems() != null &&
-                !purchase.getLineItems().isEmpty()) {
+            if (purchase.getLineItems() != null
+                    && !purchase.getLineItems().isEmpty()) {
 
-            expiryTime =
-                    purchase.getLineItems()
-                            .get(0)
-                            .getExpiryTime();
-        }
+                SubscriptionPurchaseLineItem lineItem =
+                        purchase.getLineItems().get(0);
 
-        boolean premiumActive = false;
+                expiryTime = lineItem.getExpiryTime();
+                productId = lineItem.getProductId();
+            }
 
-        if (expiryTime != null && !expiryTime.isBlank()) {
-            try {
-                Instant expiry = Instant.parse(expiryTime);
-                premiumActive = expiry.isAfter(Instant.now());
-            } catch (Exception e) {
+            boolean premiumActive = false;
+
+            if (expiryTime != null && !expiryTime.isBlank()) {
+                try {
+                    Instant expiry =
+                            Instant.parse(expiryTime);
+
+                    premiumActive =
+                            expiry.isAfter(Instant.now());
+                } catch (Exception ignored) {
+                    premiumActive = false;
+                }
+            }
+
+            // These states must not receive Premium access.
+            if ("SUBSCRIPTION_STATE_EXPIRED"
+                    .equals(subscriptionState)
+                    || "SUBSCRIPTION_STATE_ON_HOLD"
+                    .equals(subscriptionState)
+                    || "SUBSCRIPTION_STATE_PAUSED"
+                    .equals(subscriptionState)
+                    || "SUBSCRIPTION_STATE_PENDING"
+                    .equals(subscriptionState)) {
+
                 premiumActive = false;
             }
+
+            Map<String, Object> response =
+                    new HashMap<>();
+
+            response.put("verified", true);
+            response.put("premiumActive", premiumActive);
+            response.put(
+                    "subscriptionState",
+                    subscriptionState
+            );
+            response.put("expiryTime", expiryTime);
+            response.put("productId", productId);
+            response.put(
+                    "acknowledgementState",
+                    purchase.getAcknowledgementState()
+            );
+            response.put(
+                    "regionCode",
+                    purchase.getRegionCode()
+            );
+            response.put(
+                    "startTime",
+                    purchase.getStartTime()
+            );
+            response.put(
+                    "lineItems",
+                    purchase.getLineItems()
+            );
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+
+            return ResponseEntity
+                    .status(500)
+                    .body(
+                            Map.of(
+                                    "verified", false,
+                                    "error",
+                                    e.getMessage() == null
+                                            ? "Google Play verification failed"
+                                            : e.getMessage()
+                            )
+                    );
         }
-
-        // Google subscription states where access should not be granted.
-        if ("SUBSCRIPTION_STATE_EXPIRED".equals(subscriptionState)
-                || "SUBSCRIPTION_STATE_ON_HOLD".equals(subscriptionState)
-                || "SUBSCRIPTION_STATE_PAUSED".equals(subscriptionState)
-                || "SUBSCRIPTION_STATE_PENDING".equals(subscriptionState)) {
-
-            premiumActive = false;
-        }
-
-        Map<String, Object> response = new HashMap<>();
-
-        response.put("verified", true);
-        response.put("premiumActive", premiumActive);
-        response.put("subscriptionState", subscriptionState);
-        response.put("expiryTime", expiryTime);
-        response.put("acknowledgementState",
-                purchase.getAcknowledgementState());
-        response.put("regionCode",
-                purchase.getRegionCode());
-        response.put("startTime",
-                purchase.getStartTime());
-        response.put("lineItems",
-                purchase.getLineItems());
-
-        return ResponseEntity.ok(response);
-
-    } catch (Exception e) {
-
-        return ResponseEntity
-                .status(500)
-                .body(Map.of(
-                        "verified", false,
-                        "error", e.getMessage()
-                ));
     }
-}
 }
