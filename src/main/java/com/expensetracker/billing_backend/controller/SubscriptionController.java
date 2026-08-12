@@ -83,8 +83,7 @@ public class SubscriptionController {
                     .equals(subscriptionState)
                     || "SUBSCRIPTION_STATE_PAUSED"
                     .equals(subscriptionState)
-                    || "SUBSCRIPTION_STATE_PENDING"
-                    .equals(subscriptionState)) {
+                    ) {
 
                 premiumActive = false;
             }
